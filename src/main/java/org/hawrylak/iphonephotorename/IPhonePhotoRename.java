@@ -23,6 +23,7 @@ public class IPhonePhotoRename {
 
     private static Logger logger = LogManager.getLogger(IPhonePhotoRename.class);
     private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss");
+    private static String supportedExtention = "jpeg";
 
     public static void main(String[] args) {
         String directory = args[0];
@@ -42,11 +43,19 @@ public class IPhonePhotoRename {
         logger.info("IPhone Photo Rename (reads data from EXIF of jpeg");
         for (String file : listFiles(directory)) {
             var fileName = parseFileName(glue(directory, file));
+            if (!isSupportedExtention(fileName)) {
+                logger.warn("Not supported file type " + file);
+                continue;
+            }
             var dateFromEXIF = readDateFromFile(fileName);
             validateDate(dateFromEXIF, earliestValidDate, fileName);
             var newName = generateNewName(dateFromEXIF);
             logger.info(fileName.nameWithoutExtension() + " -> " + dateFromEXIF + " -> " + newName);
         }
+    }
+
+    private boolean isSupportedExtention(FileName fileName) {
+        return fileName.extension().isPresent() && fileName.extension().get().equalsIgnoreCase(supportedExtention);
     }
 
     private Boolean validateDate(Date date, Optional<Date> earliestValidDate, FileName fileName) {
