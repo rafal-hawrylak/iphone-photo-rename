@@ -8,8 +8,10 @@ import com.drew.metadata.Tag;
 import com.drew.metadata.exif.ExifSubIFDDirectory;
 import java.io.File;
 import java.io.IOException;
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -23,21 +25,40 @@ public class IPhonePhotoRename {
     private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss");
 
     public static void main(String[] args) {
+        String directory = args[0];
+        Optional<Date> earliestValidDate = args.length >= 2 ? convertToDate(args[1]) : Optional.empty();
+        new IPhonePhotoRename().run(directory, earliestValidDate);
+    }
+
+    private static Optional<Date> convertToDate(String date) {
         try {
-            new IPhonePhotoRename().run(args[0]);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            return Optional.ofNullable(formatter.parse(date));
+        } catch (ParseException e) {
+            return Optional.empty();
         }
     }
 
-    private void run(String directory) throws IOException {
+    private void run(String directory, Optional<Date> earliestValidDate) {
         logger.info("IPhone Photo Rename (reads data from EXIF of jpeg");
         for (String file : listFiles(directory)) {
             var fileName = parseFileName(glue(directory, file));
-            var date = readDateFromFile(fileName);
-            var newName = generateNewName(date);
-            logger.info(fileName.nameWithoutExtension() + " -> " + date + " -> " + newName);
+            var dateFromEXIF = readDateFromFile(fileName);
+            validateDate(dateFromEXIF, earliestValidDate, fileName);
+            var newName = generateNewName(dateFromEXIF);
+            logger.info(fileName.nameWithoutExtension() + " -> " + dateFromEXIF + " -> " + newName);
         }
+    }
+
+    private Boolean validateDate(Date date, Optional<Date> earliestValidDate, FileName fileName) {
+        if (Objects.isNull(date)) {
+            logger.error("Could not read date from " + fileName.name());
+            return false;
+        }
+        if (earliestValidDate.isPresent() && date.before(earliestValidDate.get())) {
+            logger.error("Date " + date + " is before " + earliestValidDate.get() + " for file " + fileName.name());
+            return false;
+        }
+        return true;
     }
 
     private String glue(String directory, String file) {
@@ -45,7 +66,14 @@ public class IPhonePhotoRename {
     }
 
     private Set<String> listFiles(String dir) {
-        return Stream.of(new File(dir).listFiles())
+        File[] files = new File(dir).listFiles();
+        if (Objects.isNull(files)) {
+            throw new IllegalArgumentException("Invalid directory: " + dir);
+        }
+        if (files.length == 0) {
+            throw new IllegalArgumentException("Empty directory: " + dir);
+        }
+        return Stream.of(files)
             .filter(file -> !file.isDirectory())
             .map(File::getName)
             .collect(Collectors.toSet());
