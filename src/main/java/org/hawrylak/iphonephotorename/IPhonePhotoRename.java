@@ -8,12 +8,15 @@ import com.drew.metadata.Tag;
 import com.drew.metadata.exif.ExifSubIFDDirectory;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
@@ -26,6 +29,10 @@ public class IPhonePhotoRename {
     private static String supportedExtention = "jpeg";
 
     public static void main(String[] args) {
+        if (args.length == 0) {
+            logger.error("usage:\r\nIPhonePhotoRename directory [earliestValidDate]");
+            return;
+        }
         String directory = args[0];
         Optional<Date> earliestValidDate = args.length >= 2 ? convertToDate(args[1]) : Optional.empty();
         new IPhonePhotoRename().run(directory, earliestValidDate);
@@ -42,16 +49,36 @@ public class IPhonePhotoRename {
     private void run(String directory, Optional<Date> earliestValidDate) {
         logger.info("IPhone Photo Rename (reads data from EXIF of jpeg");
         for (String file : listFiles(directory)) {
-            var fileName = parseFileName(glue(directory, file));
+            var fileName = parseFileName(glue(directory, file, Optional.empty()));
             if (!isSupportedExtention(fileName)) {
                 logger.warn("Not supported file type " + file);
                 continue;
             }
             var dateFromEXIF = readDateFromFile(fileName);
             validateDate(dateFromEXIF, earliestValidDate, fileName);
-            var newName = generateNewName(dateFromEXIF);
+            var newName = getFirstFreeName(fileName, dateFromEXIF);
             logger.info(fileName.nameWithoutExtension() + " -> " + dateFromEXIF + " -> " + newName);
         }
+    }
+
+    private String getFirstFreeName(FileName fileName, Date date) {
+        var newName = "";
+        Date newDate;
+        try {
+            newDate = formatter.parse(formatter.format(date));
+        } catch (ParseException e) {
+            throw new RuntimeException(e);
+        }
+        do {
+            newName = generateNewName(newDate);
+            newDate.setTime(newDate.getTime() + 1000);
+        } while (fileExists(glue(fileName.path(), newName, fileName.extension())));
+        return newName;
+    }
+
+    private boolean fileExists(String fileName) {
+        Path path = Paths.get(fileName);
+        return Files.exists(path);
     }
 
     private boolean isSupportedExtention(FileName fileName) {
@@ -70,11 +97,11 @@ public class IPhonePhotoRename {
         return true;
     }
 
-    private String glue(String directory, String file) {
-        return directory + File.separator + file;
+    private String glue(String directory, String file, Optional<String> extension) {
+        return directory + File.separator + file + extension.map(s -> "." + s).orElse("");
     }
 
-    private Set<String> listFiles(String dir) {
+    private List<String> listFiles(String dir) {
         File[] files = new File(dir).listFiles();
         if (Objects.isNull(files)) {
             throw new IllegalArgumentException("Invalid directory: " + dir);
@@ -85,14 +112,15 @@ public class IPhonePhotoRename {
         return Stream.of(files)
             .filter(file -> !file.isDirectory())
             .map(File::getName)
-            .collect(Collectors.toSet());
+            .sorted()
+            .collect(Collectors.toList());
     }
 
     private FileName parseFileName(String fileName) {
         var file = new File(fileName);
         Optional<String> nameWithoutExtension = getFileNameWithoutExtension(file.getName());
         Optional<String> extension = getFileNameExtension(fileName);
-        return new FileName(file, file.getAbsolutePath(), file.getName(), nameWithoutExtension, extension);
+        return new FileName(file, file.getParent(), file.getName(), nameWithoutExtension, extension);
     }
 
     private String generateNewName(Date date) {
