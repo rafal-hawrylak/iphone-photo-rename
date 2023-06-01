@@ -17,6 +17,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
@@ -27,6 +28,7 @@ public class IPhonePhotoRename {
     private static Logger logger = LogManager.getLogger(IPhonePhotoRename.class);
     private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss");
     private static String supportedExtention = "jpeg";
+    private static Pattern supportedFileNamePattern = Pattern.compile("^img_\\d+\\." + supportedExtention + "$");
 
     public static void main(String[] args) {
         if (args.length == 0) {
@@ -54,11 +56,19 @@ public class IPhonePhotoRename {
                 logger.warn("Not supported file type " + file);
                 continue;
             }
+            if (!isSupportedFileName(fileName)) {
+                logger.warn("Not supported file name " + file);
+                continue;
+            }
             var dateFromEXIF = readDateFromFile(fileName);
             validateDate(dateFromEXIF, earliestValidDate, fileName);
             var newName = getFirstFreeName(fileName, dateFromEXIF);
             logger.info(fileName.nameWithoutExtension() + " -> " + dateFromEXIF + " -> " + newName);
         }
+    }
+
+    private boolean isSupportedFileName(FileName fileName) {
+        return supportedFileNamePattern.matcher(fileName.name().toLowerCase()).matches();
     }
 
     private String getFirstFreeName(FileName fileName, Date date) {
