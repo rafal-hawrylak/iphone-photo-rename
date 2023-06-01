@@ -27,8 +27,8 @@ public class IPhonePhotoRename {
 
     private static Logger logger = LogManager.getLogger(IPhonePhotoRename.class);
     private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss");
-    private static String supportedExtention = "jpeg";
-    private static Pattern supportedFileNamePattern = Pattern.compile("^img_\\d+\\." + supportedExtention + "$");
+    private static Pattern supportedImageFileNamePattern = Pattern.compile("^img_\\d+\\.jpeg$");
+    private static Pattern supportedMovieFileNamePattern = Pattern.compile("^img_\\d+\\.mov$");
 
     public static void main(String[] args) {
         if (args.length == 0) {
@@ -36,8 +36,9 @@ public class IPhonePhotoRename {
             return;
         }
         String directory = args[0];
-        Optional<Date> earliestValidDate = args.length >= 2 ? convertToDate(args[1]) : Optional.empty();
-        new IPhonePhotoRename().run(directory, earliestValidDate);
+        boolean dryRun = args.length >= 2 ? Boolean.parseBoolean(args[1]) : true;
+        Optional<Date> earliestValidDate = args.length >= 3 ? convertToDate(args[2]) : Optional.empty();
+        new IPhonePhotoRename().run(directory, dryRun, earliestValidDate);
     }
 
     private static Optional<Date> convertToDate(String date) {
@@ -48,26 +49,41 @@ public class IPhonePhotoRename {
         }
     }
 
-    private void run(String directory, Optional<Date> earliestValidDate) {
+    private void run(String directory, boolean dryRun, Optional<Date> earliestValidDate) {
         logger.info("IPhone Photo Rename (reads data from EXIF of jpeg");
+        RenameInfo previousImage = null;
         for (String file : listFiles(directory)) {
             var fileName = parseFileName(glue(directory, file, Optional.empty()));
-            if (!isSupportedExtention(fileName)) {
-                logger.warn("Not supported file type " + file);
-                continue;
-            }
-            if (!isSupportedFileName(fileName)) {
+            if (isSupportedFileName(fileName, supportedImageFileNamePattern)) {
+                var dateFromEXIF = readDateFromFile(fileName);
+                validateDate(dateFromEXIF, earliestValidDate, fileName);
+                var newName = getFirstFreeName(fileName, dateFromEXIF);
+                previousImage = new RenameInfo(fileName, dateFromEXIF, newName);
+                boolean moved = move(fileName, newName, dryRun);
+                logger.info("photo | moved=" + moved + "; " + fileName.name() + " -> " + dateFromEXIF + " -> " + newName);
+            } else if (isSupportedFileName(fileName, supportedMovieFileNamePattern)) {
+                if (Objects.nonNull(previousImage)) {
+                    var newName = getFirstFreeName(fileName, previousImage.date());
+                    boolean moved = move(fileName, newName, dryRun);
+                    logger.info("video | moved=" + moved + "; " + fileName.name() + " -> " + previousImage.date() + " -> " + newName);
+                } else {
+                    logger.warn("could not process movie file " + fileName);
+                }
+            } else {
                 logger.warn("Not supported file name " + file);
-                continue;
             }
-            var dateFromEXIF = readDateFromFile(fileName);
-            validateDate(dateFromEXIF, earliestValidDate, fileName);
-            var newName = getFirstFreeName(fileName, dateFromEXIF);
-            logger.info(fileName.nameWithoutExtension() + " -> " + dateFromEXIF + " -> " + newName);
         }
     }
 
-    private boolean isSupportedFileName(FileName fileName) {
+    private boolean move(FileName fileName, String newName, boolean dryRun) {
+        if (dryRun) {
+            return false;
+        }
+        String targetPath = newPath(fileName, newName);
+        return fileName.file().renameTo(new File(targetPath));
+    }
+
+    private boolean isSupportedFileName(FileName fileName, Pattern supportedFileNamePattern) {
         return supportedFileNamePattern.matcher(fileName.name().toLowerCase()).matches();
     }
 
@@ -82,17 +98,17 @@ public class IPhonePhotoRename {
         do {
             newName = generateNewName(newDate);
             newDate.setTime(newDate.getTime() + 1000);
-        } while (fileExists(glue(fileName.path(), newName, fileName.extension())));
+        } while (fileExists(newPath(fileName, newName)));
         return newName;
+    }
+
+    private String newPath(FileName fileName, String newName) {
+        return glue(fileName.path(), newName, fileName.extension());
     }
 
     private boolean fileExists(String fileName) {
         Path path = Paths.get(fileName);
         return Files.exists(path);
-    }
-
-    private boolean isSupportedExtention(FileName fileName) {
-        return fileName.extension().isPresent() && fileName.extension().get().equalsIgnoreCase(supportedExtention);
     }
 
     private Boolean validateDate(Date date, Optional<Date> earliestValidDate, FileName fileName) {
