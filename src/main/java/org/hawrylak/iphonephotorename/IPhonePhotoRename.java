@@ -169,7 +169,7 @@ public class IPhonePhotoRename {
         try {
             Metadata metadata = ImageMetadataReader.readMetadata(fileName.file());
             ExifSubIFDDirectory directory = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
-            return directory.getDate(ExifSubIFDDirectory.TAG_DATETIME_ORIGINAL);
+            return directory.getDateOriginal();
         } catch (ImageProcessingException e) {
             throw new RuntimeException(e);
         } catch (IOException e) {
