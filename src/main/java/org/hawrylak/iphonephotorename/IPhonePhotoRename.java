@@ -29,6 +29,7 @@ public class IPhonePhotoRename {
     private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH.mm.ss");
     private static Pattern supportedImageFileNamePattern = Pattern.compile("^img_\\d+\\.jpeg$");
     private static Pattern supportedMovieFileNamePattern = Pattern.compile("^img_\\d+\\.mov$");
+    private final static boolean REPLACE_IN_CASE_OF_FILENAME_COLLISION = false;
 
     public static void main(String[] args) {
         if (args.length == 0) {
@@ -57,15 +58,23 @@ public class IPhonePhotoRename {
             if (isSupportedFileName(fileName, supportedImageFileNamePattern)) {
                 var dateFromEXIF = readDateFromFile(fileName);
                 validateDate(dateFromEXIF, earliestValidDate, fileName);
-                var newName = getFirstFreeName(fileName, dateFromEXIF);
-                previousImage = new RenameInfo(fileName, dateFromEXIF, newName);
-                boolean moved = move(fileName, newName, dryRun);
-                logger.info("photo | moved=" + moved + "; " + fileName.name() + " -> " + dateFromEXIF + " -> " + newName);
+                if (solvableFilenameCollision(fileName, dateFromEXIF)) {
+                    var newName = getFirstFreeName(fileName, dateFromEXIF);
+                    previousImage = new RenameInfo(fileName, dateFromEXIF, newName);
+                    boolean moved = move(fileName, newName, dryRun);
+                    logger.info("photo | moved=" + moved + "; " + fileName.name() + " -> " + dateFromEXIF + " -> " + newName);
+                } else {
+                    logger.warn("photo | unsolvable collision for " + fileName.name() + " -> " + dateFromEXIF);
+                }
             } else if (isSupportedFileName(fileName, supportedMovieFileNamePattern)) {
                 if (Objects.nonNull(previousImage)) {
-                    var newName = getFirstFreeName(fileName, previousImage.date());
-                    boolean moved = move(fileName, newName, dryRun);
-                    logger.info("video | moved=" + moved + "; " + fileName.name() + " -> " + previousImage.date() + " -> " + newName);
+                    if (solvableFilenameCollision(fileName, previousImage.date())) {
+                        var newName = getFirstFreeName(fileName, previousImage.date());
+                        boolean moved = move(fileName, newName, dryRun);
+                        logger.info("video | moved=" + moved + "; " + fileName.name() + " -> " + previousImage.date() + " -> " + newName);
+                    } else {
+                        logger.warn("video | unsolvable collision for " + fileName.name() + " -> " + previousImage.date());
+                    }
                 } else {
                     logger.warn("could not process movie file " + fileName);
                 }
@@ -73,6 +82,14 @@ public class IPhonePhotoRename {
                 logger.warn("Not supported file name " + file);
             }
         }
+    }
+
+    private boolean solvableFilenameCollision(FileName fileName, Date dateFromEXIF) {
+        var newName = generateNewName(parseDate(dateFromEXIF));
+        if (fileExists(newPath(fileName, newName))) {
+            return REPLACE_IN_CASE_OF_FILENAME_COLLISION;
+        }
+        return true;
     }
 
     private boolean move(FileName fileName, String newName, boolean dryRun) {
@@ -89,17 +106,22 @@ public class IPhonePhotoRename {
 
     private String getFirstFreeName(FileName fileName, Date date) {
         var newName = "";
+        Date newDate = parseDate(date);
+        do {
+            newName = generateNewName(newDate);
+            newDate.setTime(newDate.getTime() + 1000);
+        } while (fileExists(newPath(fileName, newName)));
+        return newName;
+    }
+
+    private static Date parseDate(Date date) {
         Date newDate;
         try {
             newDate = formatter.parse(formatter.format(date));
         } catch (ParseException e) {
             throw new RuntimeException(e);
         }
-        do {
-            newName = generateNewName(newDate);
-            newDate.setTime(newDate.getTime() + 1000);
-        } while (fileExists(newPath(fileName, newName)));
-        return newName;
+        return newDate;
     }
 
     private String newPath(FileName fileName, String newName) {
